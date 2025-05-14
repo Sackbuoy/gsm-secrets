@@ -1,18 +1,16 @@
-# getting GSM secrets in neovim
-Tool for showing the value of a GSM secret
-Also a lua script for adding the functionality to neovim
+# gsm-secrets
+Neovim plugin that uses $GOOGLE_APPLICATION_CREDENTIALS to authenticate to the
+currently active GCP project and show the value of the GSM secret currently
+highlighted
 
-Authenticates to GCP with $GOOGLE_APPLICATION_CREDENTIALS env var
+Setup assumes the `go` binary is available at your PATH
 
-## Setup
-1. Build go project, lua code assumes binary is available in your $PATH and is
-   called `gsm`
-   ```
-   go build -o gsm cmd/gsm/main.go
-   ```
-   and place the executable in your $PATH
-2. Save the `init.lua` script in `~/.config/nvim/lua/gsm-secrets/init.lua`
-3. Add the following to your neovim config:
-    ```
-    require('gsm-secrets').setup()
-    ```
+## Set up with vim-plug
+```
+vim.call('plug#begin', '~/.config/nvim/plugged')
+  Plug('Sackbuoy/gsm-secrets')
+vim.call('plug#end')
+
+require('gsm-secrets').setup()
+
+```
