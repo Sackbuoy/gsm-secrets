@@ -1,5 +1,106 @@
--- save this in ~/.config/nvim/lua/gsm-secrets/init.lua
 local M = {}
+
+-- Function to build and install the Go binary
+local function build_gsm_tool()
+  -- Path to store the Go project
+  local plugin_dir = vim.fn.stdpath("data") .. "/gsm-secrets"
+  local project_dir = plugin_dir .. "/src"
+  local bin_dir = plugin_dir .. "/bin"
+  
+  -- Create directories if they don't exist
+  vim.fn.mkdir(plugin_dir, "p")
+  vim.fn.mkdir(project_dir, "p")
+  vim.fn.mkdir(bin_dir, "p")
+  vim.fn.mkdir(project_dir .. "/cmd/gsm", "p")
+  
+  -- Create go.mod file
+  local go_mod_path = project_dir .. "/go.mod"
+  local go_mod_content = [[
+module gsm-tool
+
+go 1.21
+
+require cloud.google.com/go/secretmanager v1.11.5
+]]
+  
+  local go_mod_file = io.open(go_mod_path, "w")
+  if go_mod_file then
+    go_mod_file:write(go_mod_content)
+    go_mod_file:close()
+  end
+  
+  -- Read the Go source code from the plugin
+  local main_go_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h") .. "/main.go"
+  local main_go_file = io.open(main_go_path, "r")
+  
+  if not main_go_file then
+    vim.notify("Could not find main.go source file", vim.log.levels.ERROR)
+    return false
+  end
+  
+  local main_go_content = main_go_file:read("*all")
+  main_go_file:close()
+  
+  -- Write the Go source code to the project
+  local dest_go_path = project_dir .. "/cmd/gsm/main.go"
+  local dest_go_file = io.open(dest_go_path, "w")
+  
+  if dest_go_file then
+    dest_go_file:write(main_go_content)
+    dest_go_file:close()
+  else
+    vim.notify("Failed to write main.go", vim.log.levels.ERROR)
+    return false
+  end
+  
+  -- Build the Go project
+  vim.notify("Building GSM tool...", vim.log.levels.INFO)
+  
+  -- Change to the project directory
+  local old_dir = vim.fn.getcwd()
+  vim.fn.chdir(project_dir)
+  
+  -- Get dependencies
+  local get_deps_cmd = "go get cloud.google.com/go/secretmanager/apiv1"
+  local get_deps_result = vim.fn.system(get_deps_cmd)
+  if vim.v.shell_error ~= 0 then
+    vim.notify("Failed to get dependencies: " .. get_deps_result, vim.log.levels.ERROR)
+    vim.fn.chdir(old_dir)
+    return false
+  end
+  
+  -- Build the binary
+  local build_cmd = "go build -o " .. bin_dir .. "/gsm ./cmd/gsm"
+  local build_result = vim.fn.system(build_cmd)
+  
+  -- Return to the original directory
+  vim.fn.chdir(old_dir)
+  
+  if vim.v.shell_error ~= 0 then
+    vim.notify("Failed to build GSM tool: " .. build_result, vim.log.levels.ERROR)
+    return false
+  end
+  
+  vim.notify("GSM tool built successfully at " .. bin_dir .. "/gsm", vim.log.levels.INFO)
+  return true
+end
+
+-- Get path to the GSM binary
+local function get_gsm_path()
+  -- Try to find in PATH first
+  if vim.fn.executable("gsm") == 1 then
+    return "gsm"
+  end
+  
+  -- Check our plugin's bin directory
+  local bin_path = vim.fn.stdpath("data") .. "/gsm-secrets/bin/gsm"
+  if vim.fn.filereadable(bin_path) == 1 then
+    return bin_path
+  end
+  
+  -- Not found anywhere
+  return nil
+end
 
 -- Function to get the selected text in visual mode
 local function get_visual_selection()
@@ -39,10 +140,19 @@ function M.get_secret()
   -- Clean up the secret name (remove whitespace)
   secret_name = string.gsub(secret_name, "%s+", "")
   
-  -- Check if gsm tool is available
-  if vim.fn.executable("gsm") ~= 1 then
-    vim.notify("gsm tool not found in PATH", vim.log.levels.ERROR)
-    return
+  -- Get path to GSM tool
+  local gsm_path = get_gsm_path()
+  if not gsm_path then
+    vim.notify("GSM tool not found. Trying to build it now...", vim.log.levels.WARN)
+    if not build_gsm_tool() then
+      vim.notify("Failed to build GSM tool. Please check your Go installation.", vim.log.levels.ERROR)
+      return
+    end
+    gsm_path = get_gsm_path()
+    if not gsm_path then
+      vim.notify("GSM tool not found after build. Something went wrong.", vim.log.levels.ERROR)
+      return
+    end
   end
   
   -- Create a temporary output buffer
@@ -70,7 +180,7 @@ function M.get_secret()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {"Loading secret: " .. secret_name .. "..."})
   
   -- Run the command in the background
-  vim.fn.jobstart("gsm --name=" .. secret_name, {
+  vim.fn.jobstart(gsm_path .. " --name=" .. secret_name, {
     stdout_buffered = true,
     on_stdout = function(_, data, _)
       if data then
@@ -108,17 +218,27 @@ function M.get_secret()
 end
 
 -- Function that runs after visual selection to get the secret
-function M.visual_get_secret(args)
+function M.visual_get_secret()
   -- Process the visual selection then clear the marks
   M.get_secret()
 end
 
 -- Set up the plugin
 function M.setup()
+  -- Check if the GSM tool exists, if not, build it
+  if get_gsm_path() == nil then
+    vim.notify("GSM tool not found. Building it now...", vim.log.levels.INFO)
+    build_gsm_tool()
+  end
+  
   -- Create commands
   vim.api.nvim_create_user_command("GSMSecret", function(opts)
     M.get_secret()
   end, {range = true})
+  
+  -- Add key mappings for visual mode
+  vim.api.nvim_set_keymap("x", "<Leader>gs", ":<C-u>lua require('gsm-secrets').visual_get_secret()<CR>", {noremap = true, silent = true})
 end
 
 return M
+
