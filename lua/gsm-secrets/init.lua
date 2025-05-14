@@ -21,7 +21,7 @@ local function build_gsm_tool()
   vim.fn.chdir(plugin_source_dir)
   
   -- Build the binary
-  local build_cmd = "go build -mod=vendor -o " .. bin_dir .. "/gsm ./lua/gsm-secrets"
+  local build_cmd = "go build -mod=vendor -o " .. bin_dir .. "/gsm ./main.go"
   local build_result = vim.fn.system(build_cmd)
   
   -- Return to the original directory
